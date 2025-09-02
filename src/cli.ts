@@ -12,6 +12,8 @@ import {
   checkout,
   commit,
   url,
+  push,
+  pull,
 } from "./cli/commands";
 
 /**
@@ -259,6 +261,58 @@ Note: This command outputs only the URL, making it useful for scripts.`
   .action(
     withErrorHandling(async (path: string) => {
       await url(path);
+    })
+  );
+
+// Push command
+program
+  .command("push")
+  .description("Push local changes to remote sync server")
+  .argument("[path]", "Directory path to push from", ".")
+  .option("--dry-run", "Show what would be pushed without applying changes")
+  .option("-v, --verbose", "Verbose output")
+  .addHelpText(
+    "after",
+    `
+Examples:
+  pushwork push              # Push local changes from current directory
+  pushwork push ./my-folder  # Push from specific directory
+  pushwork push --dry-run    # Preview what would be pushed
+  
+Note: This is a one-way operation - only local changes are pushed to the server.`
+  )
+  .action(
+    withErrorHandling(async (path: string, options) => {
+      await push(path, {
+        dryRun: options.dryRun || false,
+        verbose: options.verbose || false,
+      });
+    })
+  );
+
+// Pull command
+program
+  .command("pull")
+  .description("Pull remote changes from sync server to local")
+  .argument("[path]", "Directory path to pull to", ".")
+  .option("--dry-run", "Show what would be pulled without applying changes")
+  .option("-v, --verbose", "Verbose output")
+  .addHelpText(
+    "after",
+    `
+Examples:
+  pushwork pull              # Pull remote changes to current directory
+  pushwork pull ./my-folder  # Pull to specific directory
+  pushwork pull --dry-run    # Preview what would be pulled
+  
+Note: This is a one-way operation - only remote changes are pulled to local.`
+  )
+  .action(
+    withErrorHandling(async (path: string, options) => {
+      await pull(path, {
+        dryRun: options.dryRun || false,
+        verbose: options.verbose || false,
+      });
     })
   );
 

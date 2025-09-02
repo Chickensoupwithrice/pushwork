@@ -43,13 +43,25 @@ pushwork init ./my-project
 pushwork clone <automerge-url> ./cloned-project
 ```
 
-3. **Sync changes:**
+3. **Sync changes (bidirectional):**
 
 ```bash
 pushwork sync
 ```
 
-4. **Check status:**
+4. **Push only local changes:**
+
+```bash
+pushwork push
+```
+
+5. **Pull only remote changes:**
+
+```bash
+pushwork pull
+```
+
+6. **Check status:**
 
 ```bash
 pushwork status
@@ -117,6 +129,52 @@ pushwork sync --verbose
 **Options:**
 
 - `--dry-run`: Preview changes without applying them
+- `--verbose`: Show detailed progress information
+
+### `push [path] [options]`
+
+Push local changes to the remote sync server (one-way sync).
+
+```bash
+# Push local changes from current directory
+pushwork push
+
+# Push from specific directory
+pushwork push ./my-project
+
+# Preview what would be pushed
+pushwork push --dry-run
+
+# Verbose output
+pushwork push --verbose
+```
+
+**Options:**
+
+- `--dry-run`: Show what would be pushed without applying changes
+- `--verbose`: Show detailed progress information
+
+### `pull [path] [options]`
+
+Pull remote changes from the sync server to local (one-way sync).
+
+```bash
+# Pull remote changes to current directory
+pushwork pull
+
+# Pull to specific directory
+pushwork pull ./my-project
+
+# Preview what would be pulled
+pushwork pull --dry-run
+
+# Verbose output
+pushwork pull --verbose
+```
+
+**Options:**
+
+- `--dry-run`: Show what would be pulled without applying changes
 - `--verbose`: Show detailed progress information
 
 ### `diff [path] [options]`

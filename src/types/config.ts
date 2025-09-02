@@ -128,3 +128,17 @@ export interface LogOptions extends CommandOptions {
 export interface CheckoutOptions extends CommandOptions {
   force?: boolean;
 }
+
+/**
+ * Push command specific options
+ */
+export interface PushOptions extends CommandOptions {
+  dryRun?: boolean;
+}
+
+/**
+ * Pull command specific options
+ */
+export interface PullOptions extends CommandOptions {
+  dryRun?: boolean;
+}

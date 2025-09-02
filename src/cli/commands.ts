@@ -11,6 +11,8 @@ import {
   DiffOptions,
   LogOptions,
   CheckoutOptions,
+  PushOptions,
+  PullOptions,
   DirectoryConfig,
   DirectoryDocument,
 } from "../types";
@@ -1050,4 +1052,250 @@ export async function commit(
   }
 }
 
-// TODO: Add push and pull commands later
+/**
+ * Push local changes to remote (one-way sync)
+ */
+export async function push(
+  targetPath: string = ".",
+  options: PushOptions = {}
+): Promise<void> {
+  const spinner = ora("Starting push operation...").start();
+  let repo: Repo | undefined;
+
+  try {
+    // Setup shared context with network enabled
+    spinner.text = "Setting up push context...";
+    const context = await setupCommandContext(
+      targetPath,
+      undefined,
+      undefined,
+      true // Enable network for push
+    );
+    repo = context.repo;
+    const syncEngine = context.syncEngine;
+    const workingDir = context.workingDir;
+    spinner.succeed("Connected to repository");
+
+    ProgressMessages.directoryFound();
+    ProgressMessages.configLoaded();
+    ProgressMessages.repoConnected();
+
+    // Show root directory URL for context
+    const pushStatus = await syncEngine.getStatus();
+    if (pushStatus.snapshot?.rootDirectoryUrl) {
+      ProgressMessages.rootUrl(pushStatus.snapshot.rootDirectoryUrl);
+    }
+
+    if (options.dryRun) {
+      // Dry run mode - show what would be pushed
+      spinner.text = "Analyzing local changes (dry run)...";
+      const preview = await syncEngine.previewChanges();
+      const localChanges = preview.changes.filter(
+        (c) => c.changeType === "local_only" || c.changeType === "both_changed"
+      );
+
+      spinner.succeed("Change analysis completed");
+
+      console.log(`\n${chalk.bold("📤 Push Preview")} (dry run):`);
+      console.log(chalk.gray(`  Directory: ${workingDir}`));
+
+      if (localChanges.length === 0) {
+        console.log(`\n${chalk.green("✨ No local changes to push")}`);
+        return;
+      }
+
+      console.log(`\n${chalk.bold("📋 Summary:")}`);
+      console.log(`  ${localChanges.length} local change${localChanges.length > 1 ? "s" : ""} would be pushed`);
+
+      console.log(`\n${chalk.bold("📤 Files to Push:")}`);
+      for (const change of localChanges.slice(0, 10)) {
+        const typeIcon = change.changeType === "local_only" ? chalk.green("➕") : chalk.yellow("📝");
+        console.log(`  ${typeIcon} ${change.path}`);
+      }
+      if (localChanges.length > 10) {
+        console.log(chalk.gray(`  ... and ${localChanges.length - 10} more files`));
+      }
+
+      console.log(`\n${chalk.cyan("ℹ️  Run without --dry-run to push these changes")}`);
+    } else {
+      // Actual push operation
+      spinner.text = "Pushing local changes...";
+      const startTime = Date.now();
+
+      const result = await syncEngine.pushToRemote(false);
+      const totalTime = Date.now() - startTime;
+
+      if (result.success) {
+        spinner.succeed(`Push completed in ${totalTime}ms`);
+
+        console.log(`\n${chalk.bold("📤 Push Results:")}`);
+        console.log(`  📄 Files pushed: ${chalk.yellow(result.filesChanged)}`);
+        console.log(`  📁 Directories changed: ${chalk.yellow(result.directoriesChanged)}`);
+        console.log(`  ⏱️  Total time: ${chalk.gray(totalTime + "ms")}`);
+
+        if (result.warnings.length > 0) {
+          console.log(`\n${chalk.yellow("⚠️  Warnings:")} (${result.warnings.length})`);
+          for (const warning of result.warnings.slice(0, 5)) {
+            console.log(`  ${chalk.yellow("⚠️")} ${warning}`);
+          }
+          if (result.warnings.length > 5) {
+            console.log(chalk.gray(`  ... and ${result.warnings.length - 5} more warnings`));
+          }
+        }
+
+        if (result.filesChanged === 0 && result.directoriesChanged === 0) {
+          console.log(`\n${chalk.green("✨ No local changes to push!")}`);
+        } else {
+          console.log(`\n${chalk.green("✅ Push successful!")} Your changes are now on the sync server.`);
+        }
+      } else {
+        spinner.fail("Push completed with errors");
+
+        console.log(`\n${chalk.red("❌ Push Errors:")} (${result.errors.length})`);
+        for (const error of result.errors.slice(0, 5)) {
+          console.log(`  ${chalk.red("❌")} ${error.path}: ${error.error.message}`);
+        }
+        if (result.errors.length > 5) {
+          console.log(chalk.gray(`  ... and ${result.errors.length - 5} more errors`));
+        }
+        process.exit(1);
+      }
+    }
+
+    // Cleanup repo resources
+    if (repo) {
+      await safeRepoShutdown(repo, "push");
+    }
+  } catch (error) {
+    if (repo) {
+      await safeRepoShutdown(repo, "push-error");
+    }
+    spinner.fail(`Push failed: ${error}`);
+    console.error(chalk.red(`Error: ${error}`));
+    process.exit(1);
+  }
+}
+
+/**
+ * Pull remote changes to local (one-way sync)
+ */
+export async function pull(
+  targetPath: string = ".",
+  options: PullOptions = {}
+): Promise<void> {
+  const spinner = ora("Starting pull operation...").start();
+  let repo: Repo | undefined;
+
+  try {
+    // Setup shared context with network enabled
+    spinner.text = "Setting up pull context...";
+    const context = await setupCommandContext(
+      targetPath,
+      undefined,
+      undefined,
+      true // Enable network for pull
+    );
+    repo = context.repo;
+    const syncEngine = context.syncEngine;
+    const workingDir = context.workingDir;
+    spinner.succeed("Connected to repository");
+
+    ProgressMessages.directoryFound();
+    ProgressMessages.configLoaded();
+    ProgressMessages.repoConnected();
+
+    // Show root directory URL for context
+    const pullStatus = await syncEngine.getStatus();
+    if (pullStatus.snapshot?.rootDirectoryUrl) {
+      ProgressMessages.rootUrl(pullStatus.snapshot.rootDirectoryUrl);
+    }
+
+    if (options.dryRun) {
+      // Dry run mode - show what would be pulled
+      spinner.text = "Analyzing remote changes (dry run)...";
+      const preview = await syncEngine.previewChanges();
+      const remoteChanges = preview.changes.filter(
+        (c) => c.changeType === "remote_only" || c.changeType === "both_changed"
+      );
+
+      spinner.succeed("Change analysis completed");
+
+      console.log(`\n${chalk.bold("📥 Pull Preview")} (dry run):`);
+      console.log(chalk.gray(`  Directory: ${workingDir}`));
+
+      if (remoteChanges.length === 0) {
+        console.log(`\n${chalk.green("✨ No remote changes to pull")}`);
+        return;
+      }
+
+      console.log(`\n${chalk.bold("📋 Summary:")}`);
+      console.log(`  ${remoteChanges.length} remote change${remoteChanges.length > 1 ? "s" : ""} would be pulled`);
+
+      console.log(`\n${chalk.bold("📥 Files to Pull:")}`);
+      for (const change of remoteChanges.slice(0, 10)) {
+        const typeIcon = change.changeType === "remote_only" ? chalk.blue("⬇️") : chalk.yellow("🔀");
+        console.log(`  ${typeIcon} ${change.path}`);
+      }
+      if (remoteChanges.length > 10) {
+        console.log(chalk.gray(`  ... and ${remoteChanges.length - 10} more files`));
+      }
+
+      console.log(`\n${chalk.cyan("ℹ️  Run without --dry-run to pull these changes")}`);
+    } else {
+      // Actual pull operation
+      spinner.text = "Pulling remote changes...";
+      const startTime = Date.now();
+
+      const result = await syncEngine.pullFromRemote(false);
+      const totalTime = Date.now() - startTime;
+
+      if (result.success) {
+        spinner.succeed(`Pull completed in ${totalTime}ms`);
+
+        console.log(`\n${chalk.bold("📥 Pull Results:")}`);
+        console.log(`  📄 Files pulled: ${chalk.yellow(result.filesChanged)}`);
+        console.log(`  📁 Directories changed: ${chalk.yellow(result.directoriesChanged)}`);
+        console.log(`  ⏱️  Total time: ${chalk.gray(totalTime + "ms")}`);
+
+        if (result.warnings.length > 0) {
+          console.log(`\n${chalk.yellow("⚠️  Warnings:")} (${result.warnings.length})`);
+          for (const warning of result.warnings.slice(0, 5)) {
+            console.log(`  ${chalk.yellow("⚠️")} ${warning}`);
+          }
+          if (result.warnings.length > 5) {
+            console.log(chalk.gray(`  ... and ${result.warnings.length - 5} more warnings`));
+          }
+        }
+
+        if (result.filesChanged === 0 && result.directoriesChanged === 0) {
+          console.log(`\n${chalk.green("✨ No remote changes to pull!")}`);
+        } else {
+          console.log(`\n${chalk.green("✅ Pull successful!")} Remote changes are now in your local directory.`);
+        }
+      } else {
+        spinner.fail("Pull completed with errors");
+
+        console.log(`\n${chalk.red("❌ Pull Errors:")} (${result.errors.length})`);
+        for (const error of result.errors.slice(0, 5)) {
+          console.log(`  ${chalk.red("❌")} ${error.path}: ${error.error.message}`);
+        }
+        if (result.errors.length > 5) {
+          console.log(chalk.gray(`  ... and ${result.errors.length - 5} more errors`));
+        }
+        process.exit(1);
+      }
+    }
+
+    // Cleanup repo resources
+    if (repo) {
+      await safeRepoShutdown(repo, "pull");
+    }
+  } catch (error) {
+    if (repo) {
+      await safeRepoShutdown(repo, "pull-error");
+    }
+    spinner.fail(`Pull failed: ${error}`);
+    console.error(chalk.red(`Error: ${error}`));
+    process.exit(1);
+  }
+}

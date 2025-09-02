@@ -84,6 +84,235 @@ export class SyncEngine {
   }
 
   /**
+   * Push local changes to remote (network sync enabled)
+   */
+  async pushToRemote(dryRun = false): Promise<SyncResult> {
+    console.log(`🚀 Starting push to remote (dryRun: ${dryRun})`);
+
+    const result: SyncResult = {
+      success: false,
+      filesChanged: 0,
+      directoriesChanged: 0,
+      errors: [],
+      warnings: [],
+    };
+
+    try {
+      // Load current snapshot
+      console.log(`📸 Loading current snapshot...`);
+      let snapshot = await this.snapshotManager.load();
+      if (!snapshot) {
+        console.log(`📸 No snapshot found, creating empty one`);
+        snapshot = this.snapshotManager.createEmpty();
+      } else {
+        console.log(`📸 Snapshot loaded with ${snapshot.files.size} files`);
+        if (snapshot.rootDirectoryUrl) {
+          console.log(`🔗 Root directory URL: ${snapshot.rootDirectoryUrl}`);
+        }
+      }
+
+      // Backup snapshot before starting
+      if (!dryRun) {
+        console.log(`💾 Backing up snapshot...`);
+        await this.snapshotManager.backup();
+      }
+
+      // Reset handles to wait on
+      this.handlesToWaitOn = [];
+
+      // Detect all changes
+      console.log(`🔍 Detecting changes...`);
+      const changes = await this.changeDetector.detectChanges(snapshot);
+      console.log(`🔍 Found ${changes.length} changes`);
+
+      // Filter for local changes only
+      const localChanges = changes.filter(
+        (c) =>
+          c.changeType === ChangeType.LOCAL_ONLY ||
+          c.changeType === ChangeType.BOTH_CHANGED
+      );
+      console.log(`📤 Found ${localChanges.length} local changes to push`);
+
+      // Detect moves
+      console.log(`📦 Detecting moves...`);
+      const { moves, remainingChanges } = await this.moveDetector.detectMoves(
+        changes,
+        snapshot,
+        this.rootPath
+      );
+      console.log(
+        `📦 Found ${moves.length} moves, ${remainingChanges.length} remaining changes`
+      );
+
+      // Filter remaining changes for local only
+      const localRemainingChanges = remainingChanges.filter(
+        (c) =>
+          c.changeType === ChangeType.LOCAL_ONLY ||
+          c.changeType === ChangeType.BOTH_CHANGED
+      );
+
+      // Push local changes to remote
+      console.log(`📤 Pushing local changes to remote...`);
+      const pushResult = await this.pushLocalChanges(
+        localRemainingChanges,
+        moves,
+        snapshot,
+        dryRun
+      );
+      console.log(
+        `📤 Push complete: ${pushResult.filesChanged} files changed`
+      );
+
+      result.filesChanged += pushResult.filesChanged;
+      result.directoriesChanged += pushResult.directoriesChanged;
+      result.errors.push(...pushResult.errors);
+      result.warnings.push(...pushResult.warnings);
+
+      // Wait for network sync if enabled and not dry run
+      if (!dryRun && this.networkSyncEnabled && this.handlesToWaitOn.length > 0) {
+        console.log(`⏳ Waiting for network sync...`);
+        try {
+          await waitForSync(
+            this.handlesToWaitOn,
+            getSyncServerStorageId(this.syncServerStorageId)
+          );
+          console.log(`✅ Network sync complete`);
+        } catch (error) {
+          console.error(`❌ Network sync failed: ${error}`);
+          result.warnings.push(`Network sync failed: ${error}`);
+        }
+      }
+
+      // Save updated snapshot if not dry run
+      if (!dryRun) {
+        await this.snapshotManager.save(snapshot);
+      }
+
+      result.success = result.errors.length === 0;
+      console.log(`📤 Push ${result.success ? "completed" : "failed"}`);
+
+      return result;
+    } catch (error) {
+      console.error(`❌ Push failed: ${error}`);
+      result.errors.push({
+        path: this.rootPath,
+        operation: "pushToRemote",
+        error: error instanceof Error ? error : new Error(String(error)),
+        recoverable: true,
+      });
+      result.success = false;
+      return result;
+    }
+  }
+
+  /**
+   * Pull remote changes to local (network sync enabled)
+   */
+  async pullFromRemote(dryRun = false): Promise<SyncResult> {
+    console.log(`🚀 Starting pull from remote (dryRun: ${dryRun})`);
+
+    const result: SyncResult = {
+      success: false,
+      filesChanged: 0,
+      directoriesChanged: 0,
+      errors: [],
+      warnings: [],
+    };
+
+    try {
+      // Load current snapshot
+      console.log(`📸 Loading current snapshot...`);
+      let snapshot = await this.snapshotManager.load();
+      if (!snapshot) {
+        console.log(`📸 No snapshot found, creating empty one`);
+        snapshot = this.snapshotManager.createEmpty();
+      } else {
+        console.log(`📸 Snapshot loaded with ${snapshot.files.size} files`);
+        if (snapshot.rootDirectoryUrl) {
+          console.log(`🔗 Root directory URL: ${snapshot.rootDirectoryUrl}`);
+        }
+      }
+
+      // Backup snapshot before starting
+      if (!dryRun) {
+        console.log(`💾 Backing up snapshot...`);
+        await this.snapshotManager.backup();
+      }
+
+      // Reset handles to wait on and wait for network sync first
+      this.handlesToWaitOn = [];
+
+      if (!dryRun && this.networkSyncEnabled && snapshot.rootDirectoryUrl) {
+        console.log(`⏳ Syncing with network first...`);
+        try {
+          const rootHandle = await this.repo.find<DirectoryDocument>(
+            snapshot.rootDirectoryUrl
+          );
+          this.handlesToWaitOn.push(rootHandle);
+          
+          await waitForSync(
+            this.handlesToWaitOn,
+            getSyncServerStorageId(this.syncServerStorageId)
+          );
+          console.log(`✅ Network sync complete`);
+        } catch (error) {
+          console.error(`❌ Network sync failed: ${error}`);
+          result.warnings.push(`Network sync failed: ${error}`);
+        }
+      }
+
+      // Detect all changes after network sync
+      console.log(`🔍 Detecting changes...`);
+      const changes = await this.changeDetector.detectChanges(snapshot);
+      console.log(`🔍 Found ${changes.length} changes`);
+
+      // Filter for remote changes only
+      const remoteChanges = changes.filter(
+        (c) =>
+          c.changeType === ChangeType.REMOTE_ONLY ||
+          c.changeType === ChangeType.BOTH_CHANGED
+      );
+      console.log(`📥 Found ${remoteChanges.length} remote changes to pull`);
+
+      // Pull remote changes to local
+      console.log(`📥 Pulling remote changes to local...`);
+      const pullResult = await this.pullRemoteChanges(
+        remoteChanges,
+        snapshot,
+        dryRun
+      );
+      console.log(
+        `📥 Pull complete: ${pullResult.filesChanged} files changed`
+      );
+
+      result.filesChanged += pullResult.filesChanged;
+      result.directoriesChanged += pullResult.directoriesChanged;
+      result.errors.push(...pullResult.errors);
+      result.warnings.push(...pullResult.warnings);
+
+      // Save updated snapshot if not dry run
+      if (!dryRun) {
+        await this.snapshotManager.save(snapshot);
+      }
+
+      result.success = result.errors.length === 0;
+      console.log(`📥 Pull ${result.success ? "completed" : "failed"}`);
+
+      return result;
+    } catch (error) {
+      console.error(`❌ Pull failed: ${error}`);
+      result.errors.push({
+        path: this.rootPath,
+        operation: "pullFromRemote",
+        error: error instanceof Error ? error : new Error(String(error)),
+        recoverable: true,
+      });
+      result.success = false;
+      return result;
+    }
+  }
+
+  /**
    * Commit local changes only (no network sync)
    */
   async commitLocal(dryRun = false): Promise<SyncResult> {
