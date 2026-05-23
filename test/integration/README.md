@@ -107,6 +107,25 @@ Specialized test demonstrating pushwork's excellent CRDT-based conflict resoluti
 - ✅ Sync timing issue has been resolved
 - Repositories eventually converge to consistent state
 
+### Deterministic Local-Relay Harness
+
+A seeded `fast-check` harness for distributed-system probing. It spawns an
+in-process Automerge sync relay (`test/helpers/local-relay-server.ts`)
+on a freshly-allocated localhost port and drives the built `pushwork`
+CLI against it, so each run is self-contained and does not depend on any
+public sync server or machine-specific path.
+
+```bash
+pnpm run test:deterministic-harness
+pnpm run test:deterministic-probe
+```
+
+- `test:deterministic-harness` runs a `fast-check` workload against a per-run local relay and reports the shrunk counterexample when convergence fails.
+- `test:deterministic-probe` is a focused repro for stale existing-workspace remote visibility.
+- Use `PUSHWORK_FC_SEED` and `PUSHWORK_FC_PATH` to replay a shrunk failing harness case.
+- Use `PUSHWORK_FC_REPLAY='{"repoAOperations":[...],"repoBOperations":[...]}'` to replay the exact minimized operation trace emitted by a failing run.
+- The harness sandboxes `HOME`/`USERPROFILE`/`XDG_CONFIG_HOME` to a per-run temp directory so ambient `~/.pushwork/config.json` does not leak into test cases.
+
 ## Test Configuration
 
 ### Required Dependencies

@@ -119,6 +119,11 @@ Key fields:
   - Tree traversal (`collectHeadsRecursive`) fetches siblings concurrently via `Promise.all`
 - Documents sync level-by-level, deepest first, so children are on the server before their parents
 - `handlesByPath` map tracks which documents changed and need syncing
+- `test/integration/deterministic-sync-harness.ts` is a standalone seeded fast-check harness that drives the built CLI against a per-run local relay process. It is intentionally run via `tsx` instead of Jest because the CLI + relay subprocess flow is easier to bound, replay, and shrink outside Jest workers.
+- `test/integration/deterministic-harness-probe.ts` is a focused local-relay repro for stale existing-workspace visibility. It currently fails when `pushwork diff` stays blind after another peer advances remote state.
+- `test/helpers/local-relay-server.ts` is an inlined Automerge sync relay used by both harness scripts. It runs in-process via `tsx`, listens on a freshly-allocated localhost port, and writes `READY <storageId>` to stdout once it accepts connections. The relay pre-seeds `storage-adapter-id` in its data directory because the upstream `StorageSubsystem.id()` has a race when the file does not yet exist: the Repo's internal `peerMetadata` promise and an explicit `await repo.storageId()` can both fall into the "generate a fresh UUID" branch and disagree on which id wins, causing pushwork to wait forever for sync against the wrong storage id.
+- The deterministic harness sandboxes `HOME`/`USERPROFILE`/`XDG_CONFIG_HOME` via `PUSHWORK_TEST_HOME` so ambient `~/.pushwork/config.json` does not leak into runs.
+- `PUSHWORK_FC_REPLAY` accepts a JSON trace with `repoAOperations` and `repoBOperations` so a shrunk failure can be replayed without depending on fast-check generator stability.
 
 ## Leaf-first ordering
 
