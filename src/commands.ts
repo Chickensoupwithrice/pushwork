@@ -445,6 +445,7 @@ export async function diff(
     for (const change of preview.changes) {
       out.log(change.path);
     }
+    await safeRepoShutdown(repo);
     return;
   }
 
