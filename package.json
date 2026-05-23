@@ -14,6 +14,7 @@
 		"dev": "tsc --watch",
 		"test": "jest",
 		"test:bail": "jest --bail",
+		"test:concurrent-same-file": "jest test/integration/concurrent-same-file-sync.test.ts --runInBand",
 		"test:deterministic-harness": "tsx test/integration/deterministic-sync-harness.ts",
 		"test:deterministic-probe": "tsx test/integration/deterministic-harness-probe.ts",
 		"test:watch": "jest --watch",
