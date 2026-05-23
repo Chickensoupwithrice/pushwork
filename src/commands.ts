@@ -436,7 +436,7 @@ export async function diff(
 ): Promise<void> {
   out.task("Analyzing changes");
 
-  const { repo, syncEngine } = await setupCommandContext(targetPath, { syncEnabled: false });
+  const { repo, syncEngine } = await setupCommandContext(targetPath);
   const preview = await syncEngine.previewChanges();
 
   out.done();
@@ -445,6 +445,7 @@ export async function diff(
     for (const change of preview.changes) {
       out.log(change.path);
     }
+    await safeRepoShutdown(repo);
     return;
   }
 

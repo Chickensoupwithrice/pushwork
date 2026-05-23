@@ -453,54 +453,9 @@ export class SyncEngine {
 
 			debug(`sync: rootDirectoryUrl=${snapshot.rootDirectoryUrl}, files=${snapshot.files.size}, dirs=${snapshot.directories.size}`)
 
-			// Wait for initial sync to receive any pending remote changes
-			if (this.config.sync_enabled && snapshot.rootDirectoryUrl) {
-				debug("sync: waiting for root document to be ready")
-				out.update("Waiting for root document from server")
-
-				// Wait for the root document to be fetched from the network.
-				// repo.find() rejects with "unavailable" if the server doesn't
-				// have the document yet, so we retry with backoff.
-				// This is critical for clone scenarios.
-				const plainRootUrl = getPlainUrl(snapshot.rootDirectoryUrl)
-				const maxAttempts = 6
-				for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-					try {
-						const rootHandle = await this.repo.find<DirectoryDocument>(plainRootUrl)
-						rootHandle.doc() // throws if not ready
-						debug(`sync: root document ready (attempt ${attempt})`)
-						break
-					} catch (error) {
-						const isUnavailable = String(error).includes("unavailable") || String(error).includes("not ready")
-						if (isUnavailable && attempt < maxAttempts) {
-							const delay = Math.min(1000 * Math.pow(2, attempt - 1), 10000)
-							debug(`sync: root document not available (attempt ${attempt}/${maxAttempts}), retrying in ${delay}ms`)
-							out.update(`Waiting for root document (attempt ${attempt}/${maxAttempts})`)
-							await new Promise(r => setTimeout(r, delay))
-						} else {
-							debug(`sync: root document unavailable after ${maxAttempts} attempts: ${error}`)
-							out.taskLine(`Root document unavailable: ${error}`, true)
-							break
-						}
-					}
-				}
-
-				debug("sync: waiting for initial bidirectional sync")
-				out.update("Waiting for initial sync from server")
-				try {
-					await waitForBidirectionalSync(
-						this.repo,
-						snapshot.rootDirectoryUrl,
-						{
-							timeoutMs: 5000, // Increased timeout for initial sync
-							pollIntervalMs: 100,
-							stableChecksRequired: 3,
-						}
-					)
-				} catch (error) {
-					out.taskLine(`Initial sync: ${error}`, true)
-				}
-			}
+			// Refresh remote state so change detection sees any peer updates
+			// that landed since this workspace last synced.
+			await this.refreshRemoteState(snapshot)
 
 			// Detect all changes
 			debug("sync: detecting changes")
@@ -1765,6 +1720,16 @@ export class SyncEngine {
 			}
 		}
 
+		// Best-effort: pull in any remote head advancement before running
+		// change detection. If the network refresh fails (e.g. the relay
+		// is unreachable) we still want preview to work against the local
+		// snapshot, so we swallow errors here.
+		try {
+			await this.refreshRemoteState(snapshot)
+		} catch (error) {
+			debug(`previewChanges: remote refresh failed, falling back to local state: ${error}`)
+		}
+
 		const changes = await this.changeDetector.detectChanges(snapshot)
 		const {moves} = await this.moveDetector.detectMoves(changes, snapshot)
 
@@ -1856,6 +1821,69 @@ export class SyncEngine {
 			}
 		} catch (error) {
 			// Failed to update root directory timestamp
+		}
+	}
+
+	/**
+	 * Refresh remote state before running change detection so an already-
+	 * tracked workspace sees head advancement that happened on other
+	 * peers. Without this, commands like `pushwork diff` would only see
+	 * stale local snapshot state and falsely report "No changes detected".
+	 *
+	 * No-ops when sync is disabled or when the snapshot has no root URL.
+	 * Tolerates the root document being temporarily unavailable on the
+	 * relay because the first sync after init/clone may not have
+	 * stabilized yet.
+	 */
+	private async refreshRemoteState(snapshot: SyncSnapshot): Promise<void> {
+		if (!this.config.sync_enabled || !snapshot.rootDirectoryUrl) {
+			return
+		}
+
+		debug("refreshRemoteState: waiting for root document to be ready")
+		out.update("Waiting for root document from server")
+
+		const plainRootUrl = getPlainUrl(snapshot.rootDirectoryUrl)
+		const maxAttempts = 6
+		for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+			try {
+				const rootHandle = await this.repo.find<DirectoryDocument>(plainRootUrl)
+				rootHandle.doc() // throws if not ready
+				debug(`refreshRemoteState: root document ready (attempt ${attempt})`)
+				break
+			} catch (error) {
+				const isUnavailable =
+					String(error).includes("unavailable") ||
+					String(error).includes("not ready")
+				if (isUnavailable && attempt < maxAttempts) {
+					const delay = Math.min(1000 * Math.pow(2, attempt - 1), 10000)
+					debug(
+						`refreshRemoteState: root document not available (attempt ${attempt}/${maxAttempts}), retrying in ${delay}ms`
+					)
+					out.update(
+						`Waiting for root document (attempt ${attempt}/${maxAttempts})`
+					)
+					await new Promise(r => setTimeout(r, delay))
+				} else {
+					debug(
+						`refreshRemoteState: root document unavailable after ${maxAttempts} attempts: ${error}`
+					)
+					out.taskLine(`Root document unavailable: ${error}`, true)
+					return
+				}
+			}
+		}
+
+		debug("refreshRemoteState: waiting for initial bidirectional sync")
+		out.update("Waiting for initial sync from server")
+		try {
+			await waitForBidirectionalSync(this.repo, snapshot.rootDirectoryUrl, {
+				timeoutMs: 5000,
+				pollIntervalMs: 100,
+				stableChecksRequired: 3,
+			})
+		} catch (error) {
+			out.taskLine(`Initial sync: ${error}`, true)
 		}
 	}
 
